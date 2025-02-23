@@ -2,100 +2,164 @@ const fs = require('fs');
 const path = require('path');
 const amqp = require('amqplib');
 const appContext = require('../../core/app-context/appContext.js');
-const mongoose = require('mongoose');
-const _ = require('lodash')
-
+const _ = require('lodash');
 const Job = require('./core/Job');
 
-// global.logger = require('../utils/logger');
-
+// Global objects to store job definitions and task registry
 let job_definitions = {};
+let tasksRegistry = {};
 
+/**
+ * Build the tasks registry at runtime.
+ *
+ * This function reads all JavaScript files in the tasks directory,
+ * and builds a mapping from each task's exported `task_name` to the task function.
+ * 
+ * New developers: Each task file MUST export a property called `task_name`.
+ * For example, in your task file:
+ *
+ *    module.exports.task_name = "INCREMENT";
+ *    module.exports = function(input) { ... };
+ *
+ * If a task file doesn't export `task_name`, an error is thrown.
+ */
+async function build_tasks_registry() {
+    const tasksDir = path.join(__dirname, './tasks');
+    const task_files = fs.readdirSync(tasksDir);
+  
+    for (let file of task_files) {
+      if (file.endsWith('.js')) {
+        const taskModule = require(path.join(tasksDir, file));
+  
+        // Check if the task module exports a task_name property
+        if (!taskModule.task_name) {
+          throw new Error(`Task file "${file}" does not export a "task_name" property.`);
+        }
+  
+        // Use the exported task_name as the key in the registry
+        const taskName = taskModule.task_name.toUpperCase(); // Normalize to uppercase if needed
+        tasksRegistry[taskName] = taskModule;
+      }
+    }
+  }
+
+/**
+ * Dynamically load all job definitions from the jobs directory.
+ * 
+ * Each job file should export an object with:
+ * - `job_name`
+ * - `job_definition` (an array defining the stages)
+ */
 async function build_job_definitions() {
+  const jobsDir = path.join(__dirname, './jobs');
+  const job_files = fs.readdirSync(jobsDir);
 
-    // Read files from the ../Jobs directory
-    const job_files = fs.readdirSync(path.join(__dirname, '../bellum-flow/jobs'));
+  for (let file of job_files) {
+    const file_path = path.join(jobsDir, file);
 
-    for (let file of job_files) {
-        const file_path = path.join(__dirname, '../bellum-flow/jobs', file);
-        
-        // Only process JavaScript files
-        if (file.endsWith('.js')) {
-            const job = require(file_path);
-            
-            // Assuming the job file exports an object with 'name' and 'array'
-            if (job && job.job_name && Array.isArray(job.job_definition)) {
-                job_definitions[job.job_name] = job.job_definition;
-            } else {
-                global.logger.warn(`Invalid job definition in file: ${file}`);
-            }
-        }
+    if (file.endsWith('.js')) {
+      const job = require(file_path);
+      if (job && job.job_name && Array.isArray(job.job_definition)) {
+        job_definitions[job.job_name] = job.job_definition;
+      } else {
+        console.warn(`Invalid job definition in file: ${file}`);
+      }
     }
-
-    return job_definitions;
+  }
 }
 
+/**
+ * Process a job message from the queue.
+ * 
+ * The consumer:
+ *  - Resolves each task using tasksRegistry.
+ *  - Auto-generates stage names (Stage 1, Stage 2, etc.) based on array index.
+ *  - Uses the provided callback function (direct reference) for each stage.
+ */
 async function process_message(message_content) {
+  try {
+    const job_name = _.get(message_content, "job_name");
+    const job_data = _.get(message_content, "job_data");
 
-    try{
-        const job_name = _.get(message_content, "job_name");
-        const job_data = _.get(message_content, "job_data");
-    
-        // Check if job exists in the map
-        if (job_definitions[job_name]) {
-            const job_definition = job_definitions[job_name];
-    
-            // Process the job
-            console.log(`Processing job: ${job_name} with data:`, job_data);
-            const job = new Job(job_name, job_definition);
-            result = await job.run(job_data);
-            console.log('Final job output:', result);
-        }
+    if (job_definitions[job_name]) {
+      const job_definition = job_definitions[job_name];
+
+      // Resolve each stage's tasks and callback
+      const resolved_job = job_definition.map((stage, index) => ({
+        // Auto-generate a stage name for logging or debugging purposes.
+        name: `Stage ${index + 1}`,
+        tasks: stage.tasks.map(task =>
+          // If task is a simple string (from TaskEnum), resolve directly.
+          typeof task === "string" 
+            ? { fn: tasksRegistry[task] }
+            // Otherwise, it's an object with fn and optionally fallbackFn.
+            : {
+                fn: tasksRegistry[task.fn],
+                fallbackFn: task.fallbackFn ? tasksRegistry[task.fallbackFn] : undefined
+              }
+        ),
+        // The callback is used as-is (it's a function reference)
+        callback: stage.callback
+      }));
+
+      console.log(`Processing job: ${job_name} with data:`, job_data);
+      const job = new Job(job_name, resolved_job);
+      const result = await job.run(job_data);
+      console.log('Final job output:', result);
+    } else {
+      console.log(`Job ${job_name} not found in job definitions.`);
     }
-    catch (error) {
-        console.log('Job execution failed:', error);
-    }
+  } catch (error) {
+    console.log('Job execution failed:', error);
+  }
 }
 
+/**
+ * Start the consumer.
+ * 
+ * The consumer:
+ *  1. Initializes the app context.
+ *  2. Builds the tasks registry (dynamically loads all tasks).
+ *  3. Loads all job definitions.
+ *  4. Connects to RabbitMQ and starts processing messages.
+ */
 async function consume() {
-    try {
-        // Initialize appContext and get configurations
+  try {
+    // Initialize application context and configuration
+    await appContext.init();
+    const config = appContext.getConfig();
 
-        await appContext.init();
-        const config = appContext.getConfig();
+    // Build tasks registry dynamically
+    await build_tasks_registry();
+    console.log('Task Registry Built:', tasksRegistry);
 
-        // Build job definitions map
-        const job_definitions = await build_job_definitions();
-        console.log('Job Definitions:', job_definitions);
-        
-        // Connect to RabbitMQ
-        const connection = await amqp.connect(config.rabbitMQ.rabbitMQUri);
-        const channel = await connection.createChannel();
+    // Build job definitions from job files
+    await build_job_definitions();
+    console.log('Job Definitions:', job_definitions);
 
-        // Declare a queue
-        const queue = config.rabbitMQ.queues.bellum_jobs_queue; // Change this to your actual queue name
-        await channel.assertQueue(queue, { durable: true });
+    // Connect to RabbitMQ and create a channel
+    const connection = await amqp.connect(config.rabbitMQ.rabbitMQUri);
+    const channel = await connection.createChannel();
 
-        console.log('Waiting for messages in %s. To exit press CTRL+C', queue);
+    // Declare the queue from which to consume job messages
+    const queue = config.rabbitMQ.queues.bellum_jobs_queue;
+    await channel.assertQueue(queue, { durable: true });
+    console.log(`Waiting for messages in ${queue}. To exit press CTRL+C`);
 
-        // Consume messages from the queue
-        channel.consume(queue, async (msg) => {
-            if (msg !== null) {
-                const message_content = JSON.parse(msg.content.toString());
-                    await process_message(message_content);
-
-                    // Acknowledge the message after processing
-                    channel.ack(msg);
-                } else {
-                    console.log(`Job ${job_name} not found in job definitions.`);
-                    channel.nack(msg, false, true); // Reject and requeue the message
-                }
-            }, { noAck: false });
-
-    } catch (err) {
-        console.error('Error in consumer:', err);
-    }
+    // Consume messages from the queue
+    channel.consume(queue, async (msg) => {
+      if (msg !== null) {
+        const message_content = JSON.parse(msg.content.toString());
+        await process_message(message_content);
+        // Acknowledge the message after successful processing
+        channel.ack(msg);
+      }
+    }, { noAck: false });
+    
+  } catch (err) {
+    console.error('Error in consumer:', err);
+  }
 }
 
-// Start the consumer
+// Start the consumer process
 consume();
