@@ -1,19 +1,20 @@
 const mongoose = require('mongoose');
 const Stage = require('./Stage');
 const { JobError } = require('../utils/errors');
-const appContext = require('../../../core/app-context/appContext'); 
+const appContext = require('../../../core/app-context/appContext');
+const validateInput = require('../utils/validateInput');
 
 class Job {
   /**
-   * Constructs a Job from a simplified job definition.
-   * Also creates a corresponding job log document in MongoDB.
    * @param {string} name - The name of the job.
-   * @param {Array} definition - Array of stage definitions.
+   * @param {Object} definition - Job definition containing optional inputSchema, preprocessor, and stages.
    */
   constructor(name, definition) {
     this.name = name;
+    this.inputSchema = definition.inputSchema;
+    this.preprocessor = definition.preprocessor;
     // Convert each stage definition into a Stage instance.
-    this.stages = definition.map((stageDef, index) => {
+    this.stages = definition.stages.map((stageDef, index) => {
       const stageName = stageDef.name || `Stage ${index + 1}`;
       const Task = require('./Task');
       const tasks = stageDef.tasks.map(
@@ -28,7 +29,7 @@ class Job {
     const config = appContext.getConfig();
     // Get the job logging configuration from the config.
     const jobLoggingUri = config.Cerebellum.BellumFlow.mongoUri;
-    const jobLoggingCollection = config.Cerebellum.BellumFlow.collection; // e.g., "BellumFlowJobs"
+    const jobLoggingCollection = config.Cerebellum.BellumFlow.collection;
 
     // Create a static connection and model if not already created.
     if (!Job.jobLoggingConnection) {
@@ -57,12 +58,8 @@ class Job {
     // Create a new job log document for this job.
     this.jobLogDoc = new Job.JobLog({ name: this.name });
     this.jobLogDoc.save()
-      .then(() => {
-        console.log(`Job log created for job: ${this.name}`);
-      })
-      .catch(err => {
-        console.error("Error creating job log:", err);
-      });
+      .then(() => console.log(`Job log created for job: ${this.name}`))
+      .catch(err => console.error("Error creating job log:", err));
   }
 
   /**
@@ -107,7 +104,18 @@ class Job {
    */
   async run(initialInput) {
     try {
-      // Log the initial input.
+      // Validate raw input if inputSchema is defined.
+      if (this.inputSchema) {
+        const validationResult = validateInput(initialInput, this.inputSchema);
+        if (!validationResult.valid) {
+          throw new Error(`Input validation error: ${validationResult.message}`);
+        }
+      }
+      // Preprocess input if a preprocessor function is provided.
+      if (this.preprocessor) {
+        initialInput = await this.preprocessor(initialInput);
+      }
+
       await this.updateJobLog({ input: initialInput });
 
       let input = initialInput;

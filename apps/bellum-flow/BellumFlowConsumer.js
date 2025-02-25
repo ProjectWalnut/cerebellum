@@ -24,24 +24,24 @@ let tasksRegistry = {};
  * If a task file doesn't export `task_name`, an error is thrown.
  */
 async function build_tasks_registry() {
-    const tasksDir = path.join(__dirname, './tasks');
-    const task_files = fs.readdirSync(tasksDir);
+  const tasksDir = path.join(__dirname, './tasks');
+  const task_files = fs.readdirSync(tasksDir);
   
-    for (let file of task_files) {
-      if (file.endsWith('.js')) {
-        const taskModule = require(path.join(tasksDir, file));
+  for (let file of task_files) {
+    if (file.endsWith('.js')) {
+      const taskModule = require(path.join(tasksDir, file));
   
         // Check if the task module exports a task_name property
-        if (!taskModule.task_name) {
-          throw new Error(`Task file "${file}" does not export a "task_name" property.`);
-        }
+      if (!taskModule.task_name) {
+        throw new Error(`Task file "${file}" does not export a "task_name" property.`);
+      }
   
         // Use the exported task_name as the key in the registry
         const taskName = taskModule.task_name.toUpperCase(); // Normalize to uppercase if needed
-        tasksRegistry[taskName] = taskModule;
-      }
+      tasksRegistry[taskName] = taskModule;
     }
   }
+}
 
 /**
  * Dynamically load all job definitions from the jobs directory.
@@ -53,13 +53,13 @@ async function build_tasks_registry() {
 async function build_job_definitions() {
   const jobsDir = path.join(__dirname, './jobs');
   const job_files = fs.readdirSync(jobsDir);
-
+  
   for (let file of job_files) {
     const file_path = path.join(jobsDir, file);
 
     if (file.endsWith('.js')) {
       const job = require(file_path);
-      if (job && job.job_name && Array.isArray(job.job_definition)) {
+      if (job && job.job_name && job.job_definition) {
         job_definitions[job.job_name] = job.job_definition;
       } else {
         console.warn(`Invalid job definition in file: ${file}`);
@@ -84,23 +84,23 @@ async function process_message(message_content) {
     if (job_definitions[job_name]) {
       const job_definition = job_definitions[job_name];
 
-      // Resolve each stage's tasks and callback
-      const resolved_job = job_definition.map((stage, index) => ({
-        // Auto-generate a stage name for logging or debugging purposes.
-        name: `Stage ${index + 1}`,
-        tasks: stage.tasks.map(task =>
-          // If task is a simple string (from TaskEnum), resolve directly.
-          typeof task === "string" 
-            ? { fn: tasksRegistry[task] }
-            // Otherwise, it's an object with fn and optionally fallbackFn.
-            : {
-                fn: tasksRegistry[task.fn],
-                fallbackFn: task.fallbackFn ? tasksRegistry[task.fallbackFn] : undefined
-              }
-        ),
-        // The callback is used as-is (it's a function reference)
-        callback: stage.callback
-      }));
+      // Resolve each stage's tasks and callback.
+      const resolved_job = {
+        inputSchema: job_definition.inputSchema,
+        preprocessor: job_definition.preprocessor,
+        stages: job_definition.stages.map((stage, index) => ({
+          name: `Stage ${index + 1}`,
+          tasks: stage.tasks.map(task =>
+            typeof task === "string"
+              ? { fn: tasksRegistry[task.toUpperCase()] }
+              : {
+                  fn: tasksRegistry[task.fn.toUpperCase()],
+                  fallbackFn: task.fallbackFn ? tasksRegistry[task.fallbackFn.toUpperCase()] : undefined
+                }
+          ),
+          callback: stage.callback
+        }))
+      };
 
       console.log(`Processing job: ${job_name} with data:`, job_data);
       const job = new Job(job_name, resolved_job);
@@ -110,7 +110,12 @@ async function process_message(message_content) {
       console.log(`Job ${job_name} not found in job definitions.`);
     }
   } catch (error) {
-    console.log('Job execution failed:', error);
+    console.log(`
+      
+      ==================================== Job execution failed: (see below error) ====================================
+
+      `
+      ,error);
   }
 }
 
@@ -155,7 +160,7 @@ async function consume() {
         channel.ack(msg);
       }
     }, { noAck: false });
-    
+
   } catch (err) {
     console.error('Error in consumer:', err);
   }
