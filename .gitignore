@@ -1,2 +1,8 @@
 node_modules/
 .DS_Store
+apps/bellum-flow/data/snp500_intraday/flattened_dataset.csv
+apps/bellum-flow/data/snp500_intraday/reshaped_dataset.csv
+apps/bellum-flow/data/snp500_intraday/dataset.csv
+apps/bellum-flow/data/snp500/sp500_stocks.csv
+apps/bellum-flow/data/snp500/sp500_index.csv
+apps/bellum-flow/data/snp500/sp500_companies.csv
