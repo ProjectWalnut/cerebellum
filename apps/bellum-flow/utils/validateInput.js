@@ -14,14 +14,21 @@ function validateInput(input, schema) {
     }
   
     // Check type of each property
-    for (const key in properties) {
-      if (key in input && typeof input[key] !== properties[key].type) {
-        return { 
-          valid: false, 
-          message: `'${key}' should be of type '${properties[key].type}', got '${typeof input[key]}' instead.` 
-        };
-      }
+    // Check type of each property
+for (const key in properties) {
+  if (key in input) {
+    const expectedType = properties[key].type;
+    const actualValue = input[key];
+    const actualType = Array.isArray(actualValue) ? 'array' : typeof actualValue;
+
+    if (actualType !== expectedType) {
+      return { 
+        valid: false, 
+        message: `'${key}' should be of type '${expectedType}', got '${actualType}' instead.` 
+      };
     }
+  }
+}
     
     return { valid: true };
   }
