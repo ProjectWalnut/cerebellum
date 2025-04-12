@@ -118,7 +118,7 @@ class Job {
 
       await this.updateJobLog({ input: initialInput });
 
-      let input = initialInput;
+      let input = { ...initialInput, __initialInput: initialInput };
       for (const stage of this.stages) {
         // Prepare a log entry for this stage.
         let stageLog = { name: stage.name, input: input, startedAt: new Date() };
@@ -128,7 +128,7 @@ class Job {
           stageLog.output = stageOutput;
           stageLog.completedAt = new Date();
           await this.pushStageLog(stageLog);
-          input = stageOutput;    // Update stageOutput as input to the next stage
+          input = { ...stageOutput, __initialInput: initialInput };    // Update stageOutput as input to the next stage
         } catch (stageError) {
           stageLog.error = stageError.message;
           stageLog.completedAt = new Date();
