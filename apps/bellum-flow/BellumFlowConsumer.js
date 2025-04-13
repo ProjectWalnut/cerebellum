@@ -98,7 +98,9 @@ async function process_message(message_content) {
                   fallbackFn: task.fallbackFn ? tasksRegistry[task.fallbackFn.toUpperCase()] : undefined
                 }
           ),
-          callback: stage.callback
+          callback: stage.callback,
+          mode: stage.mode || "parallel",
+          nextTasks: stage.nextTasks || null
         }))
       };
 
