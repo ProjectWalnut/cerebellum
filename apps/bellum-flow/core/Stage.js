@@ -53,14 +53,17 @@ class Stage {
       throw new Error("Conditional mode requires a nextTasks function in the stage definition.");
     }
     while (true) {
-      const next = this.nextTasks(context);
-      const nextTaskArr = Array.isArray(next) ? next : [next];
+      let next = this.nextTasks(context);
+      let nextTaskArr = Array.isArray(next) ? next : [next];
       if (nextTaskArr.length === 0) break;
-      const outputs = await Promise.all(nextTaskArr.map(task => task.run(context)));
+      let outputs = await Promise.all(nextTaskArr.map(task => task.run(context)));
       context.previous = outputs;
       context.history.push(outputs);
     }
-    return this.callback ? await this.callback(context) : context;
+    let results = this.callback ? await this.callback(context) : context;
+    context.previous = results;
+    context.history.push(results);
+    return context;
   }
 }
 
