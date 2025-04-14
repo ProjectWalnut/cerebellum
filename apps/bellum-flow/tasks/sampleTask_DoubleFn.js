@@ -1,9 +1,9 @@
 const doubleTaskFn = async (input) => {
   let output = {};
   // Randomly fail to simulate a transient error.
-  if (Math.random() < 0.5) {
-    throw new Error('Simulated random failure in doubleTaskFn. Hey dev! Come check me in sampleTask_DoubleFn.js');
-  }
+  // if (Math.random() < 0.5) {
+  //   throw new Error('Simulated random failure in doubleTaskFn. Hey dev! Come check me in sampleTask_DoubleFn.js');
+  // }
   output.number = input.number * 2;
   return output;
 };

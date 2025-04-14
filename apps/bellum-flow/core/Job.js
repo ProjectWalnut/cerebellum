@@ -1,39 +1,65 @@
 const mongoose = require('mongoose');
-const Stage = require('./Stage');
 const { JobError } = require('../utils/errors');
 const appContext = require('../../../core/app-context/appContext');
 const validateInput = require('../utils/validateInput');
+const path = require('path');
+const fs = require('fs');
+const jobBuilder = require('./JobBuilder');
 
 class Job {
   /**
    * @param {string} name - The name of the job.
-   * @param {Object} definition - Job definition containing optional inputSchema, preprocessor, and stages.
+   * @param {Object} definition - Fully resolved job definition containing inputSchema, preprocessor, and stages.
    */
+  static taskRegistry = null;
+
+  static buildTasksRegistry() {
+   const tasksDir = path.join(__dirname, '../tasks');
+   const taskFiles = fs.readdirSync(tasksDir);
+   const registry = {};
+ 
+   for (let file of taskFiles) {
+     if (file.endsWith('.js')) {
+       const taskModule = require(path.join(tasksDir, file));
+       if (!taskModule.task_name) {
+         throw new Error(`Task file "${file}" does not export a "task_name" property.`);
+       }
+       const taskName = taskModule.task_name.toUpperCase(); // Normalize to uppercase
+       registry[taskName] = taskModule;
+     }
+   }
+   return registry;
+ }
+ 
   constructor(name, definition) {
     this.name = name;
     this.inputSchema = definition.inputSchema;
     this.preprocessor = definition.preprocessor;
-    // Convert each stage definition into a Stage instance.
-    this.stages = definition.stages.map((stageDef, index) => {
-      const stageName = stageDef.name || `Stage ${index + 1}`;
-      const Task = require('./Task');
-      const tasks = stageDef.tasks.map(
-        taskDef => new Task(taskDef.name, taskDef.fn, { fallbackFn: taskDef.fallbackFn })
-      );
-      return new Stage(stageName, tasks, stageDef.callback);
-    });
+    Job.taskRegistry = Job.buildTasksRegistry();
+
+    this.stages = jobBuilder.buildJobStages(definition, Job.taskRegistry);
+
+    // // Each stage's tasks are already instantiated.
+    // this.stages = definition.stages.map((stageDef, index) => {
+    //   const stageName = stageDef.name || `Stage ${index + 1}`;
+    //   // Simply pass along the tasks array as provided.
+    //   const tasks = stageDef.tasks;
+    //   const mode = stageDef.mode || "parallel";
+    //   const nextTasks = stageDef.nextTasks || null;
+    //   return new Stage(stageName, tasks, stageDef.callback, mode, nextTasks);
+    // });
+
+
+
 
     // ---------------------------
     // Initialize job logging
     // ---------------------------
     const config = appContext.getConfig();
-    // Get the job logging configuration from the config.
     const jobLoggingUri = config.Cerebellum.BellumFlow.mongoUri;
     const jobLoggingCollection = config.Cerebellum.BellumFlow.collection;
 
-    // Create a static connection and model if not already created.
     if (!Job.jobLoggingConnection) {
-      // Omit the deprecated options.
       Job.jobLoggingConnection = mongoose.createConnection(jobLoggingUri);
       const jobLogSchema = new mongoose.Schema({
         name: { type: String, required: true },
@@ -41,34 +67,31 @@ class Job {
         input: mongoose.Schema.Types.Mixed,
         stages: [{
           name: String,
-          input: mongoose.Schema.Types.Mixed,
-          output: mongoose.Schema.Types.Mixed,
-          error: mongoose.Schema.Types.Mixed,
+          loggedInput: mongoose.Schema.Types.Mixed,
+          loggedOutput: mongoose.Schema.Types.Mixed,
           startedAt: Date,
-          completedAt: Date
+          completedAt: Date,
+          is_completed: Boolean,
+          error: mongoose.Schema.Types.Mixed
         }],
         finalOutput: mongoose.Schema.Types.Mixed,
         error: mongoose.Schema.Types.Mixed,
+        is_completed: Boolean,
         updatedAt: { type: Date, default: Date.now }
       });
-      // Use the collection name provided in the config.
       Job.JobLog = Job.jobLoggingConnection.model('JobLog', jobLogSchema, jobLoggingCollection);
     }
 
-    // Create a new job log document for this job.
-    this.jobLogDoc = new Job.JobLog({ name: this.name });
+    this.jobLogDoc = new Job.JobLog({ name: this.name, is_completed: false });
     this.jobLogDoc.save()
       .then(() => console.log(`Job log created for job: ${this.name}`))
       .catch(err => console.error("Error creating job log:", err));
+
+    this.loggingContext = false;
   }
 
-  /**
-   * Updates the job log document using an atomic update.
-   * @param {Object} updateFields - Fields to update.
-   */
   async updateJobLog(updateFields) {
     if (this.jobLogDoc) {
-      // Use findByIdAndUpdate to avoid parallel save issues.
       const updatedDoc = await Job.JobLog.findByIdAndUpdate(
         this.jobLogDoc._id,
         { $set: { ...updateFields, updatedAt: new Date() } },
@@ -78,10 +101,6 @@ class Job {
     }
   }
 
-  /**
-   * Appends a stage log entry to the job log using an atomic update.
-   * @param {Object} stageLog - The log details for the stage.
-   */
   async pushStageLog(stageLog) {
     if (this.jobLogDoc) {
       const updatedDoc = await Job.JobLog.findByIdAndUpdate(
@@ -96,49 +115,58 @@ class Job {
     }
   }
 
-  /**
-   * Runs the job by executing each stage sequentially.
-   * Logs inputs, outputs, and errors into the job log.
-   * @param {*} initialInput - Initial input for the job.
-   * @returns {*} Final output after executing all stages.
-   */
+  createContext(input) {
+    return {
+      initial: input,
+      previous: input,
+      history: [input],
+      iteration: 0,
+      loggingEnabled: input.loggingEnabled || false
+    };
+  }
+
   async run(initialInput) {
     try {
-      // Validate raw input if inputSchema is defined.
       if (this.inputSchema) {
         const validationResult = validateInput(initialInput, this.inputSchema);
         if (!validationResult.valid) {
           throw new Error(`Input validation error: ${validationResult.message}`);
         }
       }
-      // Preprocess input if a preprocessor function is provided.
       if (this.preprocessor) {
         initialInput = await this.preprocessor(initialInput);
       }
+      let context = this.createContext(initialInput);
+      this.loggingContext = context.loggingEnabled;
 
-      await this.updateJobLog({ input: initialInput });
+      await this.updateJobLog({ input: this.loggingContext ? initialInput : "Detailed context logging is disabled." });
 
-      let input = { ...initialInput, __initialInput: initialInput };
       for (const stage of this.stages) {
-        // Prepare a log entry for this stage.
-        let stageLog = { name: stage.name, input: input, startedAt: new Date() };
+        const stageLog = {
+          name: stage.name,
+          startedAt: new Date(),
+          is_completed: false,
+          loggedInput: this.loggingContext ? context : undefined
+        };
         try {
-          // Execute the stage.
-          let stageOutput = await stage.run(input);
-          stageLog.output = stageOutput;
+          let updatedContext = await stage.run(context);
           stageLog.completedAt = new Date();
+          stageLog.is_completed = true;
+          stageLog.loggedOutput = this.loggingContext ? updatedContext : undefined;
+          stageLog.error = undefined;
           await this.pushStageLog(stageLog);
-          input = { ...stageOutput, __initialInput: initialInput };    // Update stageOutput as input to the next stage
+          context = updatedContext;
         } catch (stageError) {
-          stageLog.error = stageError.message;
           stageLog.completedAt = new Date();
+          stageLog.is_completed = true;
+          stageLog.error = stageError.message;
+          stageLog.loggedOutput = this.loggingContext ? "Stage errored before completing output logging." : undefined;
           await this.pushStageLog(stageLog);
           throw stageError;
         }
       }
-      // Log the final output.
-      await this.updateJobLog({ finalOutput: input });
-      return input;
+      await this.updateJobLog({ finalOutput: this.loggingContext ? context : "Detailed output logging is disabled.", is_completed: true });
+      return context;
     } catch (error) {
       await this.updateJobLog({ error: error.message });
       throw new JobError(this.name, error);
