@@ -6,6 +6,7 @@ const _ = require('lodash');
 const Job = require('./core/Job');
 const { buildTasksRegistry, buildResolvedJob } = require('./core/JobBuilder');
 
+// Global objects to store job definitions and task registry
 let job_definitions = {};
 
 async function build_job_definitions() {
@@ -25,6 +26,14 @@ async function build_job_definitions() {
   }
 }
 
+/**
+ * Process a job message from the queue.
+ * 
+ * The consumer:
+ *  - Resolves each task using tasksRegistry.
+ *  - Auto-generates stage names (Stage 1, Stage 2, etc.) based on array index.
+ *  - Uses the provided callback function (direct reference) for each stage.
+ */
 async function process_message(message_content) {
   try {
     const job_name = _.get(message_content, "job_name");
@@ -44,25 +53,39 @@ async function process_message(message_content) {
   }
 }
 
+/**
+ * Start the consumer.
+ * 
+ * The consumer:
+ *  1. Initializes the app context.
+ *  2. Builds the tasks registry (dynamically loads all tasks).
+ *  3. Loads all job definitions.
+ *  4. Connects to RabbitMQ and starts processing messages.
+ */
 async function consume() {
   try {
+    // Initialize application context and configuration
     await appContext.init();
     const config = appContext.getConfig();
 
     await build_job_definitions();
     console.log('Job Definitions:', job_definitions);
 
+    // Connect to RabbitMQ and create a channel
     const connection = await amqp.connect(config.rabbitMQ.rabbitMQUri);
     const channel = await connection.createChannel();
 
+    // Declare the queue from which to consume job messages
     const queue = config.rabbitMQ.queues.bellum_jobs_queue;
     await channel.assertQueue(queue, { durable: true });
     console.log(`Waiting for messages in ${queue}. To exit press CTRL+C`);
 
+    // Consume messages from the queue
     channel.consume(queue, async (msg) => {
       if (msg !== null) {
         const message_content = JSON.parse(msg.content.toString());
         await process_message(message_content);
+        // Acknowledge the message after successful processing
         channel.ack(msg);
       }
     }, { noAck: false });
@@ -72,4 +95,5 @@ async function consume() {
   }
 }
 
+// Start the consumer process
 consume();
