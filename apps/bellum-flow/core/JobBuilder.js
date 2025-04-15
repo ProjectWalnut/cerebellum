@@ -5,7 +5,8 @@ const Stage = require('./Stage');
  * Resolves and instantiates a single task definition using the provided registry.
  * For example:
  *   - If task is a string, returns an instantiated Task with that name and function.
- *   - If task is an object with a 'fn' property, instantiates a Task using the fn (and fallbackFn, if any).
+ *   - If task is an object with a 'fn' property, instantiates a Task using the fn (and fallbackFn, if any),
+ *     and passes along an optional `args` property.
  */
 function resolveAndInstantiateTask(task, registry) {
   if (typeof task === "string") {
@@ -27,9 +28,12 @@ function resolveAndInstantiateTask(task, registry) {
       }
       options.fallbackFn = fb;
     }
+    // New: Pass along optional args if provided.
+    if (task.args) {
+      options.args = task.args;
+    }
     return new Task(task.fn, fn, options);
   } else {
-    // Already instantiated? Otherwise, throw an error.
     throw new Error("Unrecognized task definition format.");
   }
 }

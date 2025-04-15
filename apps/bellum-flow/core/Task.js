@@ -7,7 +7,7 @@ class Task {
   /**
    * @param {string} name - Name of the task.
    * @param {Function} taskFn - The asynchronous function representing the task.
-   * @param {Object} options - Options including retryOptions and fallbackFn.
+   * @param {Object} options - Options including retryOptions, fallbackFn, and optional args.
    */
   constructor(name, taskFn, options = {}) {
     this.name = name;
@@ -18,6 +18,8 @@ class Task {
     // Capture optional input/output schemas if defined on the task function.
     this.inputSchema = taskFn.inputSchema || null;
     this.outputSchema = taskFn.outputSchema || null;
+    // New: Optional arguments (e.g., { symbol: 'AAPL' }) to be passed to the task function.
+    this.args = options.args || undefined;
   }
 
   async run(input) {
@@ -37,9 +39,18 @@ class Task {
 
       let result;
       if (this.retryOptions) {
-        result = await withRetry(this.taskFn, payload, this.retryOptions);
+        // Call the task function with parameterized args if provided.
+        if (this.args !== undefined) {
+          result = await withRetry(this.taskFn, payload, this.retryOptions, this.args);
+        } else {
+          result = await withRetry(this.taskFn, payload, this.retryOptions);
+        }
       } else {
-        result = await this.taskFn(payload);
+        if (this.args !== undefined) {
+          result = await this.taskFn(payload, this.args);
+        } else {
+          result = await this.taskFn(payload);
+        }
       }
 
       // Validate the output if an output schema is defined.
