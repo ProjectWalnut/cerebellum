@@ -4,7 +4,8 @@ const TaskEnums = {
     DECREMENT: "DECREMENT",
     FALLBACK_FOR_DOUBLE: "FALLBACK_FOR_DOUBLE",
     OHLC: "OHLC",
-    ARGSFN:"ARGSFN"
+    ARGSFN:"ARGSFN",
+    VOLUME_SPIKE_DETECTOR: "VOLUME_SPIKE_DETECTOR"
   };
 
   module.exports = TaskEnums

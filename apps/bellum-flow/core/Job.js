@@ -166,7 +166,7 @@ class Job {
         }
       }
       await this.updateJobLog({ finalOutput: this.loggingContext ? context : "Detailed output logging is disabled.", is_completed: true });
-      return context;
+      return context.previous;
     } catch (error) {
       await this.updateJobLog({ error: error.message });
       throw new JobError(this.name, error);
