@@ -24,8 +24,8 @@ const moment = require('moment');
  * Returns an object: { stockPair: string, anomalies: Array }
  */
 const detectCorrelationShift = async (input, args) => {
-  const stockA = input.stockA;
-  const stockB = input.stockB;
+  const stockA = args.stockA;
+  const stockB = args.stockB;
   const windowSize = args.windowSize || 5;
   const shiftThreshold = args.shiftThreshold || 0.5;
   const chunkSizeHours = args.chunkSizeHours || 6;
@@ -51,7 +51,7 @@ const detectCorrelationShift = async (input, args) => {
   let sumA = 0, sumB = 0, sumAB = 0, sumA2 = 0, sumB2 = 0;
   let prevCorr = null;
   let inSpike = false;
-
+  let totalRowsProcessed = 0;
   while (currentStart.isBefore(globalEnd)) {
     const currentEnd = moment.min(currentStart.clone().add(chunkSizeHours, 'hours'), globalEnd);
 
@@ -100,6 +100,7 @@ const detectCorrelationShift = async (input, args) => {
     }
 
     // Process merged rows sequentially.
+    totalRowsProcessed += merged.length;
     for (let i = 0; i < merged.length; i++) {
       const row = merged[i];
       const priceA = row.priceA;
@@ -164,7 +165,7 @@ const detectCorrelationShift = async (input, args) => {
   }
 
   await client.end();
-  return { stockPair: `${stockA}-${stockB}`, anomalies };
+  return { stockPair: `${stockA}-${stockB}`, anomalies, totalRowsProcessed };
 };
 
 module.exports = detectCorrelationShift;
