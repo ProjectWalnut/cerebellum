@@ -143,4 +143,14 @@ module.exports = {
     "chunkSizeHours": 12
   }
 }
+
+Logic:
+
+For each stock pair, query close‑price data in time chunks.
+
+Maintain running aggregates (sum, sumSquares, sumProducts) for each 30‑row window to compute correlation incrementally.
+
+Flag an anomaly when |currCorr – prevCorr| > 0.7, recording only the first point of each shift.
+
+
 */

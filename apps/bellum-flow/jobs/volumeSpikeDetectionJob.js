@@ -112,6 +112,13 @@ module.exports = {
   }
 }
 
+Logic:
+
+Query 12‑hour chunks of intraday volume.
+
+Maintain a 72‑row sliding window with running sum & sum‑of‑squares.
+
+Compute mean & std, flag a spike when volume > mean + 6×std, record only the first event per spike.
 
 {
   "job_name": "sudden_volume_spike_detection",
