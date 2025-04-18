@@ -1,4 +1,4 @@
-# 🔥 BellumFlow: A Generic, Extensible Job‑Orchestration Framework
+# 🔥 BellumFlow: A Light-Weight, Fast & Extensible Job‑Orchestration Framework
 
 ## Table of Contents
 1. [Overview](#overview)  
@@ -15,7 +15,7 @@
 ---
 
 ## Overview
-BellumFlow is a **standalone**, open‑source framework for orchestrating complex, multi‑step data or compute pipelines.  
+BellumFlow is a **standalone**, light-weight framework for orchestrating complex, multi‑step data or compute pipelines.  
 Designed to be **domain‑agnostic**, you can write “Jobs” for any use case, from ETL and ML workflows to DevOps automation.
 
 **Key Pillars:**
