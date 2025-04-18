@@ -100,7 +100,7 @@ const detectCorrelationShift = async (input, args) => {
     }
 
     // Process merged rows sequentially.
-    totalRowsProcessed += merged.length;
+    totalRowsProcessed += merged.length; 
     for (let i = 0; i < merged.length; i++) {
       const row = merged[i];
       const priceA = row.priceA;
@@ -165,6 +165,7 @@ const detectCorrelationShift = async (input, args) => {
   }
 
   await client.end();
+  totalRowsProcessed = totalRowsProcessed * 2;
   return { stockPair: `${stockA}-${stockB}`, anomalies, totalRowsProcessed };
 };
 
