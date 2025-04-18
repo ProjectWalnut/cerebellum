@@ -85,7 +85,7 @@ const processOHLCValidation = async (input) => {
   
   // Wait for all chunks to process
   await Promise.all(promises);
-  return anomalies;
+  return {anomalies};
 }
 
 processOHLCValidation.inputSchema = {

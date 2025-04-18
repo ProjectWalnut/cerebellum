@@ -1,6 +1,5 @@
-const mongoose = require('mongoose');
+const { JobLog } = require('./jobLogModel');
 const { JobError } = require('../utils/errors');
-const appContext = require('../../../core/app-context/appContext');
 const validateInput = require('../utils/validateInput');
 const path = require('path');
 const fs = require('fs');
@@ -14,104 +13,67 @@ class Job {
   static taskRegistry = null;
 
   static buildTasksRegistry() {
-   const tasksDir = path.join(__dirname, '../tasks');
-   const taskFiles = fs.readdirSync(tasksDir);
-   const registry = {};
- 
-   for (let file of taskFiles) {
-     if (file.endsWith('.js')) {
-       const taskModule = require(path.join(tasksDir, file));
-       if (!taskModule.task_name) {
-         throw new Error(`Task file "${file}" does not export a "task_name" property.`);
-       }
-       const taskName = taskModule.task_name.toUpperCase(); // Normalize to uppercase
-       registry[taskName] = taskModule;
-     }
-   }
-   return registry;
- }
- 
+    const tasksDir = path.join(__dirname, '../tasks');
+    const taskFiles = fs.readdirSync(tasksDir);
+    const registry = {};
+  
+    for (let file of taskFiles) {
+      if (file.endsWith('.js')) {
+        const taskModule = require(path.join(tasksDir, file));
+        if (!taskModule.task_name) {
+          throw new Error(`Task file "${file}" does not export a "task_name" property.`);
+        }
+        const taskName = taskModule.task_name.toUpperCase(); // Normalize to uppercase
+        registry[taskName] = taskModule;
+      }
+    }
+    return registry;
+  }
+
+  /**
+   * Async factory: loads or creates the JobLog, then returns an initialized Job
+   */
+  static async build(name, definition, jobId = null) {
+    const instance = new Job(name, definition);
+    if (jobId) {
+      instance.jobLogDoc = await JobLog.findById(jobId);
+    } else {
+      instance.jobLogDoc = await JobLog.create({ name: instance.name, is_completed: false });
+    }
+    return instance;
+  }
+
   constructor(name, definition) {
     this.name = name;
     this.inputSchema = definition.inputSchema;
     this.preprocessor = definition.preprocessor;
-    Job.taskRegistry = Job.buildTasksRegistry();
 
+    if (!Job.taskRegistry) {
+      Job.taskRegistry = Job.buildTasksRegistry();
+    }
     this.stages = jobBuilder.buildJobStages(definition, Job.taskRegistry);
 
-    // // Each stage's tasks are already instantiated.
-    // this.stages = definition.stages.map((stageDef, index) => {
-    //   const stageName = stageDef.name || `Stage ${index + 1}`;
-    //   // Simply pass along the tasks array as provided.
-    //   const tasks = stageDef.tasks;
-    //   const mode = stageDef.mode || "parallel";
-    //   const nextTasks = stageDef.nextTasks || null;
-    //   return new Stage(stageName, tasks, stageDef.callback, mode, nextTasks);
-    // });
-
-
-
-
-    // ---------------------------
-    // Initialize job logging
-    // ---------------------------
-    const config = appContext.getConfig();
-    const jobLoggingUri = config.Cerebellum.BellumFlow.mongoUri;
-    const jobLoggingCollection = config.Cerebellum.BellumFlow.collection;
-
-    if (!Job.jobLoggingConnection) {
-      Job.jobLoggingConnection = mongoose.createConnection(jobLoggingUri);
-      const jobLogSchema = new mongoose.Schema({
-        name: { type: String, required: true },
-        createdAt: { type: Date, default: Date.now },
-        input: mongoose.Schema.Types.Mixed,
-        stages: [{
-          name: String,
-          loggedInput: mongoose.Schema.Types.Mixed,
-          loggedOutput: mongoose.Schema.Types.Mixed,
-          startedAt: Date,
-          completedAt: Date,
-          is_completed: Boolean,
-          error: mongoose.Schema.Types.Mixed
-        }],
-        finalOutput: mongoose.Schema.Types.Mixed,
-        error: mongoose.Schema.Types.Mixed,
-        is_completed: Boolean,
-        updatedAt: { type: Date, default: Date.now }
-      });
-      Job.JobLog = Job.jobLoggingConnection.model('JobLog', jobLogSchema, jobLoggingCollection);
-    }
-
-    this.jobLogDoc = new Job.JobLog({ name: this.name, is_completed: false });
-    this.jobLogDoc.save()
-      .then(() => console.log(`Job log created for job: ${this.name}`))
-      .catch(err => console.error("Error creating job log:", err));
-
+    // jobLogDoc will be attached in the async build() above
     this.loggingContext = false;
   }
 
   async updateJobLog(updateFields) {
     if (this.jobLogDoc) {
-      const updatedDoc = await Job.JobLog.findByIdAndUpdate(
+      this.jobLogDoc = await JobLog.findByIdAndUpdate(
         this.jobLogDoc._id,
         { $set: { ...updateFields, updatedAt: new Date() } },
         { new: true }
       );
-      this.jobLogDoc = updatedDoc;
     }
   }
 
   async pushStageLog(stageLog) {
     if (this.jobLogDoc) {
-      const updatedDoc = await Job.JobLog.findByIdAndUpdate(
+      this.jobLogDoc = await JobLog.findByIdAndUpdate(
         this.jobLogDoc._id,
-        { 
-          $push: { stages: stageLog },
-          $set: { updatedAt: new Date() }
-        },
+        { $push: { stages: stageLog }, $set: { updatedAt: new Date() } },
         { new: true }
       );
-      this.jobLogDoc = updatedDoc;
     }
   }
 

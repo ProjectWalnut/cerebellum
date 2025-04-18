@@ -3,9 +3,6 @@ const path = require('path');
 const amqp = require('amqplib');
 const appContext = require('../../core/app-context/appContext.js');
 const _ = require('lodash');
-const Job = require('./core/Job');
-const { buildTasksRegistry, buildResolvedJob } = require('./core/JobBuilder');
-
 // Global objects to store job definitions and task registry
 let job_definitions = {};
 
@@ -36,11 +33,15 @@ async function build_job_definitions() {
  */
 async function process_message(message_content) {
   try {
+    const Job = require('./core/Job');
     const job_name = _.get(message_content, "job_name");
     const job_data = _.get(message_content, "job_data");
+    const job_id = _.get(message_content, "job_id");
 
     if (job_definitions[job_name]) {
-      const job = new Job(job_name, job_definitions[job_name]);
+      // use our async factory to get a Job instance bound to the existing log
+      const job = await Job.build(job_name, job_definitions[job_name], job_id);
+      console.log(`Now running job - ${job_name}`)
       const result = await job.run(job_data);
       console.log('Final job output:', result);
     } else {
