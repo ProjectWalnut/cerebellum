@@ -9,24 +9,24 @@ const app = new Koa();
 const router = new Router();
 const CONTROLLERS_DIR = path.join(__dirname, "controllers");
 
-// Dynamically load route files from the controllers folder
-fs.readdirSync(CONTROLLERS_DIR).forEach((file) => {
-  const route = require(path.join(CONTROLLERS_DIR, file));
-  router.use(route.routes()).use(route.allowedMethods());
-});
-
 // Register middleware and routes
 app.use(bodyParser())
-   .use(router.routes())
-   .use(router.allowedMethods());
+  .use(router.routes())
+  .use(router.allowedMethods());
 
 async function internal_api_service() {
   try {
     // Initialize appContext and all registered services (e.g., RabbitMQ, HuggingFace, Qdrant)
     await appContext.init();
 
+    // Dynamically load route files from the controllers folder
+    fs.readdirSync(CONTROLLERS_DIR).forEach((file) => {
+      const route = require(path.join(CONTROLLERS_DIR, file));
+      router.use(route.routes()).use(route.allowedMethods());
+    });
+
     const port = process.env.PORT || 3000;
-    app.listen(port,  '0.0.0.0', () => {
+    app.listen(port, '0.0.0.0', () => {
       console.log(`Server is running on http://localhost:${port}`);
     });
   } catch (err) {
